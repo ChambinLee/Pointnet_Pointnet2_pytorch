@@ -8,6 +8,9 @@ import torch.nn.functional as F
 
 
 class STN3d(nn.Module):
+    '''
+        T-Net for 3d points
+    '''
     def __init__(self, channel):
         super(STN3d, self).__init__()
         self.conv1 = torch.nn.Conv1d(channel, 64, 1)
@@ -36,16 +39,21 @@ class STN3d(nn.Module):
         x = F.relu(self.bn5(self.fc2(x)))
         x = self.fc3(x)
 
+        # iden is a Variable with `batchsize` rows of [1, 0, 0, 0, 1, 0, 0, 0, 1]
         iden = Variable(torch.from_numpy(np.array([1, 0, 0, 0, 1, 0, 0, 0, 1]).astype(np.float32))).view(1, 9).repeat(
             batchsize, 1)
         if x.is_cuda:
             iden = iden.cuda()
-        x = x + iden
+        x = x + iden # for what?
         x = x.view(-1, 3, 3)
+        # return a collection of transform matrix. Why it have `batchsize` rows?
         return x
 
 
 class STNkd(nn.Module):
+    '''
+        T-Net for kd points
+    '''
     def __init__(self, k=64):
         super(STNkd, self).__init__()
         self.conv1 = torch.nn.Conv1d(k, 64, 1)
@@ -75,7 +83,6 @@ class STNkd(nn.Module):
         x = F.relu(self.bn4(self.fc1(x)))
         x = F.relu(self.bn5(self.fc2(x)))
         x = self.fc3(x)
-
         iden = Variable(torch.from_numpy(np.eye(self.k).flatten().astype(np.float32))).view(1, self.k * self.k).repeat(
             batchsize, 1)
         if x.is_cuda:
@@ -102,15 +109,21 @@ class PointNetEncoder(nn.Module):
 
     def forward(self, x):
         B, D, N = x.size()
-        trans = self.stn(x)
-        x = x.transpose(2, 1)
+
+        trans = self.stn(x) # get transformation matrix by T-Net
+        x = x.transpose(2, 1) # transpose tensor from BDN to BND, but share the storage. For what? Transforming by T-net
+
+        # if dim>3, we need get the coordinates of point cloud and transform them by the result of T-net.
         if D > 3:
             feature = x[:, :, 3:]
             x = x[:, :, :3]
-        x = torch.bmm(x, trans)
+        x = torch.bmm(x, trans) # batch matrix pow matrix
+        # then concatenate the transformed coordinates and features.
         if D > 3:
             x = torch.cat([x, feature], dim=2)
-        x = x.transpose(2, 1)
+
+        x = x.transpose(2, 1) # transpose tensor from BND to BDN
+
         x = F.relu(self.bn1(self.conv1(x)))
 
         if self.feature_transform:

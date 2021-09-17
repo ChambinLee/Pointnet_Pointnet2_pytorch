@@ -110,22 +110,21 @@ class PointNetEncoder(nn.Module):
     def forward(self, x):
         B, D, N = x.size()
 
-        trans = self.stn(x) # get transformation matrix by T-Net
-        x = x.transpose(2, 1) # transpose tensor from BDN to BND, but share the storage. For what? Transforming by T-net
-
-        # if dim>3, we need get the coordinates of point cloud and transform them by the result of T-net.
-        if D > 3:
+        # input transform
+        trans = self.stn(x)  # get transformation matrix by T-Net
+        x = x.transpose(2, 1)  # transpose tensor from BDN to BND, but share the storage. To Transform by T-net
+        if D > 3:  # if dim>3, we need get the coordinates of point cloud and transform them by the result of T-net.
             feature = x[:, :, 3:]
             x = x[:, :, :3]
-        x = torch.bmm(x, trans) # batch matrix pow matrix
-        # then concatenate the transformed coordinates and features.
+        x = torch.bmm(x, trans)  # batch matrix pow matrix
         if D > 3:
-            x = torch.cat([x, feature], dim=2)
+            x = torch.cat([x, feature], dim=2)  # then concatenate the transformed coordinates and features.
+        x = x.transpose(2, 1)  # transpose tensor from BND to BDN
 
-        x = x.transpose(2, 1) # transpose tensor from BND to BDN
-
+        # the first convolution
         x = F.relu(self.bn1(self.conv1(x)))
 
+        # feature transform
         if self.feature_transform:
             trans_feat = self.fstn(x)
             x = x.transpose(2, 1)
@@ -134,11 +133,17 @@ class PointNetEncoder(nn.Module):
         else:
             trans_feat = None
 
-        pointfeat = x
+        pointfeat = x  # n*64 feature map
+
+        # the second convolution
         x = F.relu(self.bn2(self.conv2(x)))
         x = self.bn3(self.conv3(x))
+
+        # max pooling layer
         x = torch.max(x, 2, keepdim=True)[0]
-        x = x.view(-1, 1024)
+
+        x = x.view(-1, 1024)  # global feature
+
         if self.global_feat:
             return x, trans, trans_feat
         else:

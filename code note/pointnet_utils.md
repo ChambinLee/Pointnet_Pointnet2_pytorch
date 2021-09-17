@@ -126,15 +126,15 @@
   - 然后将B\*D\*N的张量输入到第一个T-Net中，得到B个3*3的转换矩阵，将该矩阵与点云中每个点的三维坐标进行矩阵乘法，但是要保证点云的其他特征不变
 
     ```python
-            trans = self.stn(x)
-            x = x.transpose(2, 1)
-            if D > 3:
-                feature = x[:, :, 3:]
-                x = x[:, :, :3]
-            x = torch.bmm(x, trans) # batch matrix pow matrix
-            if D > 3:
-                x = torch.cat([x, feature], dim=2)
-            x = x.transpose(2, 1) # transpose tensor from BND to BDN
+    trans = self.stn(x)
+    x = x.transpose(2, 1)
+    if D > 3:
+        feature = x[:, :, 3:]
+        x = x[:, :, :3]
+        x = torch.bmm(x, trans) # batch matrix pow matrix
+    if D > 3:
+        x = torch.cat([x, feature], dim=2)
+    x = x.transpose(2, 1) # transpose tensor from BND to BDN
     ```
 
     - 第1行是将B\*D\*N的张量输入到T-Net中，得到B个3*3的转换矩阵。
@@ -159,5 +159,39 @@
     x = F.relu(self.bn1(self.conv1(x)))
     ```
 
-    - 其中
-
+    - 其中conv1函数为`torch.nn.Conv1d(channel, 64, 1)`，三个参数分别为输入信号通道、卷积输出通道、卷积核尺寸。BN被添加在卷积操作和激活函数Relu之间，其具体操作是将一个batch的若干个输入在某一层的同一个特征图相加，然后得到该层这些特征图上的均值和方差，用得到的均值和方差归一化这些特征图，其作用包括：
+      - 使得网络的某些输出不会因为绝对值太大而处于激活函数梯度小的地方而得到不到更新。
+      - 保证训练接和测试集独立同分布。训练时的某层的均值和方差可以保存下来，对测试集中在该层的特征图也进行同样的归一化。
+  
+  - 接下来重复进行了一次T-net转换和卷积：
+  
+    ```python
+    # feature transform
+    if self.feature_transform:
+        trans_feat = self.fstn(x)
+        x = x.transpose(2, 1)
+        x = torch.bmm(x, trans_feat)
+        x = x.transpose(2, 1)
+        else:
+            trans_feat = None
+    pointfeat = x # n*64 feature map
+    # the second convolution
+    x = F.relu(self.bn2(self.conv2(x)))
+    x = self.bn3(self.conv3(x))
+    ```
+  
+    - T-net部分和上一个一样，只不过调用的是fstn，因为每个点的特征数量变多了。
+    - pointfeat是大小为n*64的特征图，将其保留下来是为了分割网络中需要它。
+    - **这里最后一次卷积为什么不用batch normalization？**
+  
+  - 然后是maxplooling层：
+  
+    ```python
+    x = torch.max(x, 2, keepdim=True)[0]
+    ```
+  
+  - 最后将特征图拉成一维向量，作为global feature。
+  
+    ![image-20210917230723372](img/pointnet_utils.assets/image-20210917230723372.png)
+  
+    

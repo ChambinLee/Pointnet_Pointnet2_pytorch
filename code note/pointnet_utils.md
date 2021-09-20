@@ -1,3 +1,5 @@
+>这个模块搭建了posenet中特征提取的框架。
+
 ## class STN3d(nn.Module)
 
 - 功能：这是pointnet的第一个T-net，即input transform。其输入为一个batch的点云坐标，输出为batchsize个3*3的transformation matrix。
@@ -193,5 +195,26 @@
   - 最后将特征图拉成一维向量，作为global feature。
   
     ![image-20210917230723372](img/pointnet_utils.assets/image-20210917230723372.png)
-  
-    
+
+## def feature_transform_reguliarzer(trans)
+
+```python
+def feature_transform_reguliarzer(trans):
+    d = trans.size()[1]
+    I = torch.eye(d)[None, :, :]
+    if trans.is_cuda:
+        I = I.cuda()
+    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2, 1)) - I
+                      , dim=(1, 2)))
+    return loss
+```
+
+- 约束feature transformation matrix为一个正交矩阵，对应论文中的Loss函数：$L_{reg}=||I-AA^T||^2_f$
+- `trans`的维度为`B*K*K`，其中`B`和`K`分别为Batch Size和feature的维度。第二行的`d`就是`K`。
+- $I$为B\*K\*K的单位矩阵，`torch.eye(d)`生成`k*k`的单位矩阵，使用`[None, :, :]`可以为矩阵加一维，称为`1*K*k`的矩阵。
+- `torch.bmm(trans, trans.transpose(2, 1)) - I`为$||AA^T-I||$​​ 。
+- `torch.norm`是为了求矩阵范数，默认求二范数，`dim=(1, 2)`表示在第二维和第三维上都进行norm操作。由于norm的对象是`N*K*K`的矩阵，所以就是对N个`k*K`的矩阵求二范数，最终得到一个长度为N的向量。
+- 最终的loss为所有的二范数的平均值。
+
+
+

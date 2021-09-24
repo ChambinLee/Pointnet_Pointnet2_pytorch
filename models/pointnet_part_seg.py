@@ -13,7 +13,7 @@ class get_model(nn.Module):
             channel = 6
         else:
             channel = 3
-        self.part_num = part_num
+        self.part_num = part_num  # 部件类别数量，ShapeNet中为50
         self.stn = STN3d(channel)
         self.conv1 = torch.nn.Conv1d(channel, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
@@ -62,14 +62,14 @@ class get_model(nn.Module):
 
         out_max = torch.cat([out_max,label.squeeze(1)],1)
         expand = out_max.view(-1, 2048+16, 1).repeat(1, 1, N)
-        concat = torch.cat([expand, out1, out2, out3, out4, out5], 1)
+        concat = torch.cat([expand, out1, out2, out3, out4, out5], 1)  # 局部和全局特征拼接(这里将所有的一维卷积结果进行了拼接)
         net = F.relu(self.bns1(self.convs1(concat)))
         net = F.relu(self.bns2(self.convs2(net)))
         net = F.relu(self.bns3(self.convs3(net)))
         net = self.convs4(net)
         net = net.transpose(2, 1).contiguous()
         net = F.log_softmax(net.view(-1, self.part_num), dim=-1)
-        net = net.view(B, N, self.part_num) # [B, N, 50]
+        net = net.view(B, N, self.part_num) # [B, N, 50]，50为部件数
 
         return net, trans_feat
 

@@ -151,7 +151,7 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
         xyz: input points position data, [B, N, 3]
         points: input points data, [B, N, D]
     Return:
-        new_xyz: sampled points position data, [B, npoint, nsample, 3]
+        new_xyz: sampled points position data, [B, npoint, 3]
         new_points: sampled points data, [B, npoint, nsample, 3+D]
     """
     B, N, C = xyz.shape

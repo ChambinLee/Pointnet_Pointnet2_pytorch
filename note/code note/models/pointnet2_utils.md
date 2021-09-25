@@ -171,11 +171,276 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
   - nsample：每个球邻域采样的点数，作为一个group。
   - xyz：[B, N, 3]，输入点云的位置信息
   - points：[B, N, D]，输入点云的特征信息。一个完整的点云应当是(B,N,3+D)的。
-  - new_xyz：[B, npoint, nsample, 3]，将点云分组后的张量，每个点云分为npoint组，每组里包含nsample个点。
+  - new_xyz：[B, npoint, 3]，每个点云采样得到的npoint个centroid的坐标 。
   - new_points：[B, npoint, nsample, 3+D]，比上面的点云多了特征。
   - idx：[B, npoint,nsample]，代表npoint个球形区域中每个区域的nsample个采样点的索引。
 - 第四行得到`B*npoint`个centroid的index，这里可以不用管C，因为它必是3，所以可以直接用3代替就好。
 - 第五行得到这些centroid的坐标。第六行和第七行在这些centroid的球邻域中采样nsample个点，已经得到了[B, npoint, nsample, C]的张量了。
 - 第八行将每个group的点减去对应的centroid坐标，将每个group的中心移动到坐标原点。这样就已经将原来的整个点云分成很多组点云，并且将这些点云都移动到坐标系原点，这样每个group都可以使用pointnet进行全局特征提取了。
 - 由于上面的group操作只关心了点的坐标，九到十三行是判断是否要考虑点的其他特征，如果考虑，那就用sample的index找到对应的特征行，拼接到group到的点云上去。
+
+## def sample_and_group_all()
+
+```python
+def sample_and_group_all(xyz, points):
+    device = xyz.device
+    B, N, C = xyz.shape
+    new_xyz = torch.zeros(B, 1, C).to(device)
+    grouped_xyz = xyz.view(B, 1, N, C)
+    if points is not None:
+        new_points = torch.cat([grouped_xyz, points.view(B, 1, N, -1)], dim=-1)
+    else:
+        new_points = grouped_xyz
+    return new_xyz, new_points
+```
+
+- 这个函数将整个点云作为一个group，(B,1,C)中的1代表的就是整个点云只有一个group。
+- new_xyz仅仅是一个(B, 1, 3)的零矩阵，代表每个点云仅有一个centroid，为坐标零点。
+
+## class PointNetSetAbstraction(nn.Module)
+
+```python
+class PointNetSetAbstraction(nn.Module):
+    def __init__(self, npoint, radius, nsample, in_channel, mlp, group_all):
+        pass
+    def forward(self, xyz, points):
+        pass
+```
+
+![image-20210925135419363](img/pointnet2_utils.assets/image-20210925135419363.png)
+
+- 这个类用于实现pointnet++中set abstraction的部分。该部分的流程式首先通过**sampling & grouping**操作将点云分成若干个组，每个组经过pointnet（舍弃了T-Net部分）。
+
+- `__init__`函数部分：
+
+  ```python
+      def __init__(self, npoint, radius, nsample, in_channel, mlp, group_all):
+          super(PointNetSetAbstraction, self).__init__()
+          self.npoint = npoint
+          self.radius = radius
+          self.nsample = nsample
+          self.mlp_convs = nn.ModuleList()
+          self.mlp_bns = nn.ModuleList()
+          last_channel = in_channel
+          for out_channel in mlp:
+              self.mlp_convs.append(nn.Conv2d(last_channel, out_channel, 1))
+              self.mlp_bns.append(nn.BatchNorm2d(out_channel))
+              last_channel = out_channel
+          self.group_all = group_all
+  ```
+
+  - 这里主要是定义了两个`ModuleList`，`mlp_convs`是一个包含了若干层卷积操作的列表；`mlp_bns`是一个包含了若干个BN操作的列表。
+  - `mlp`是一个`int`列表，比如[128,128 ,256] ，表示三个隐藏层的feature map的数量。
+  - **这里为什么使用Conv2d？**
+
+- `forward`函数部分
+
+  ```python
+  def forward(self, xyz, points):
+      xyz = xyz.permute(0, 2, 1)
+      if points is not None:
+          points = points.permute(0, 2, 1)
+  	if self.group_all:
+  		new_xyz, new_points = sample_and_group_all(xyz, points)
+  	else:
+  		new_xyz, new_points = sample_and_group(self.npoint, \ 
+                                      self.radius, self.nsample, xyz, points)
+  	new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint]
+      for i, conv in enumerate(self.mlp_convs):
+          bn = self.mlp_bns[i]
+          new_points =  F.relu(bn(conv(new_points)))
+      new_points = torch.max(new_points, 2)[0]
+      new_xyz = new_xyz.permute(0, 2, 1)
+      return new_xyz, new_points
+  ```
+
+  - 第二行首先将点云坐标数据从(B,3,N)转换为(B,N,3)。三四行也是同样的操作。
+  - 五到九行进行点云的**sampling & grouping**操作，得到的`new_xyz`是为每个点云sampling的npoint个centroid，如果`self.group_all==True`，则只取一个坐标系中心点作为centroid。得到的new_points为点云group后的结果，其shape为(B, npoint, nsample, 3+D)，其中npoint为每个点云的centroid数量，nsample为每个centroid以radius为半径的球邻域采样的点数量。
+  - 第十行将**sampling & grouping**得到的点云组转换为卷积网络能够接收的张量维度顺序。**这个顺序是怎么知道的？**
+  - for循环就是将点云组经过若干层的卷积、Relu和BN运算。**需要注意的是，input为点云的坐标加特征，而不是仅用特征进行运算。**
+  - 十四行再对运算结果做一个最大池化得到pointnet提取的点云组中每个小点云全局特征。
+  - 最后返回的是：**sampling**得到的centroid矩阵`new_xyz`，其用于记录每个小点云在原来的点云中的位置；**sampling & grouping**后的小点云经过pointnet提取到的全局特征。
+  - 这样，我们在大点云中选取了npoint个相距很远的centroid，然后再以他们为中心采样了球形邻域的点集，并使用pointnet提取了这些点集的全局特征。最终得到的结果是一些centroid，和每个centroid对应的一个全局特征。这个操作就像是在图像中选择一个卷积中心和合适的感受野并进行卷积一样。
+
+## class PointNetSetAbstractionMsg(nn.Module)
+
+```python
+class PointNetSetAbstractionMsg(nn.Module):
+    def __init__(self, npoint, radius_list, nsample_list, in_channel, mlp_list):
+        pass
+    def forward(self, xyz, points):
+        pass
+```
+
+- 使用MSG（multi-scale grouping）的set abstration。MSG的思想如下图所示。其相较于普通的SA结构，对ball query的结果又进行了不同尺度的点云特征提取与拼接。
+
+  ![image-20210925155708975](img/pointnet2_utils.assets/image-20210925155708975.png)
+
+- `__init__`函数部分
+
+  ```python
+      def __init__(self, npoint, radius_list, nsample_list, in_channel, mlp_list):
+          super(PointNetSetAbstractionMsg, self).__init__()
+          self.npoint = npoint
+          self.radius_list = radius_list
+          self.nsample_list = nsample_list
+          self.conv_blocks = nn.ModuleList()
+          self.bn_blocks = nn.ModuleList()
+          for i in range(len(mlp_list)):
+              convs = nn.ModuleList()
+              bns = nn.ModuleList()
+              last_channel = in_channel + 3
+              for out_channel in mlp_list[i]:
+                  convs.append(nn.Conv2d(last_channel, out_channel, 1))
+                  bns.append(nn.BatchNorm2d(out_channel))
+                  last_channel = out_channel
+              self.conv_blocks.append(convs)
+              self.bn_blocks.append(bns)
+  ```
+
+  - npoint：与普通的SA结构中的相同。
+  - radius_list：比如等于[0.2,0.4,0.8]，表示选取的三个嵌套球的半径。
+  - nsample_list：比如等于[32,64,128]，三个嵌套球里采样的点数。
+  - in_channel：输入的点云中每个点的特征维度。pointnet++中，经过SA结构提取特征后依然可以看成是一个点云，只不过每个点的特征包含了这些点周围的信息。
+  - **`last_channel = in_channel + 3`是什么意思？难道是将每个点加上它的坐标信息？**
+  - mlp_list：比如等于[[64,64,128],[128,128,256],[128,128,256]]，其中第i个list对应第i个半径的卷积层列表。
+
+- `forward`函数部分
+
+  ```python
+      def forward(self, xyz, points):
+          xyz = xyz.permute(0, 2, 1)
+          if points is not None:
+              points = points.permute(0, 2, 1)
+          B, N, C = xyz.shape
+          S = self.npoint
+          new_xyz = index_points(xyz, farthest_point_sample(xyz, S))  # 最远点采样
+          new_points_list = []  # 将不同半径下的点云特征保存在new_points_list
+          for i, radius in enumerate(self.radius_list):
+              K = self.nsample_list[i]
+              group_idx = query_ball_point(radius, K, xyz, new_xyz)
+              grouped_xyz = index_points(xyz, group_idx)
+              grouped_xyz -= new_xyz.view(B, S, 1, C)
+              if points is not None:
+                  grouped_points = index_points(points, group_idx)
+                  grouped_points = torch.cat([grouped_points, grouped_xyz], dim=-1)
+              else:
+                  grouped_points = grouped_xyz
+              grouped_points = grouped_points.permute(0, 3, 2, 1)  # [B, D, K, S]
+              for j in range(len(self.conv_blocks[i])):
+                  conv = self.conv_blocks[i][j]
+                  bn = self.bn_blocks[i][j]
+                  grouped_points =  F.relu(bn(conv(grouped_points)))
+              new_points = torch.max(grouped_points, 2)[0]  # [B, D', S]
+              new_points_list.append(new_points)
+          new_xyz = new_xyz.permute(0, 2, 1)
+          new_points_concat = torch.cat(new_points_list, dim=1)
+          return new_xyz, new_points_concat
+  ```
+
+  - 重要变量介绍
+
+    - xyz: input points position data, [B, C, N]
+    - points: input points feature data, [B, D, N]
+
+    - new_points_list
+
+  - 第七行，还是首先在输入点云中采样了npoint个centroid。
+
+  - 在采样到centroid之后，使用两个for循环分别遍历不同的球半径以及不同的卷积层。需要注意的是，不同的球半径在提取特征的时候并不共享网络层，而是使用不同的卷积层进行卷积。**这样做有什么特殊的用意吗？**
+
+  - 第十一、十二行，在点云中找球形邻域的点作为group。
+
+  - 十三行将这些group的centroid移动到零点。
+
+  - 十四到十九行是将点云的其他特征concat到group的每个点后面。作为神经网络的输入。
+
+  - 接下来就使用卷积层提取每个group的特征，这里对于第i个半径，使用`conv_blocks`中第i个卷积网络提取特征。
+
+  - 二十七行将不同半径提取到的特征concat在一起，这就是MSG的思想。
+
+## class PointNetFeaturePropagation(nn.Module)
+
+```python
+class PointNetFeaturePropagation(nn.Module):
+    def __init__(self, in_channel, mlp):
+        pass
+    def forward(self, xyz1, xyz2, points1, points2):
+        pass
+```
+
+- 该函数定义了Segementation网络需要使用的interpolate和unit pointnet运算。	![image-20210925135419363](img/pointnet2_utils.assets/image-20210925135419363.png)
+
+- `__init__`函数：
+
+  ```python
+      def __init__(self, in_channel, mlp):
+          super(PointNetFeaturePropagation, self).__init__()
+          self.mlp_convs = nn.ModuleList()
+          self.mlp_bns = nn.ModuleList()
+          last_channel = in_channel
+          for out_channel in mlp:
+              self.mlp_convs.append(nn.Conv1d(last_channel, out_channel, 1))
+              self.mlp_bns.append(nn.BatchNorm1d(out_channel))
+              last_channel = out_channel
+  ```
+
+  - 比较简单，就是简单的卷积层和BN层的定义，但是需要注意的是，这里又改用了一维卷积。
+
+- `forward`函数;
+
+  ```python
+      def forward(self, xyz1, xyz2, points1, points2):
+          xyz1 = xyz1.permute(0, 2, 1)
+          xyz2 = xyz2.permute(0, 2, 1)
+          points2 = points2.permute(0, 2, 1)
+          B, N, C = xyz1.shape
+          _, S, _ = xyz2.shape
+          if S == 1:
+              interpolated_points = points2.repeat(1, N, 1)
+          else:
+              dists = square_distance(xyz1, xyz2)
+              dists, idx = dists.sort(dim=-1)
+              dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+              dist_recip = 1.0 / (dists + 1e-8)  # 距离越远的点权重越小
+              norm = torch.sum(dist_recip, dim=2, keepdim=True)
+              weight = dist_recip / norm  # 对于每一个点的群众再做一个全局的归一化
+              interpolated_points = torch.sum(index_points(points2, idx) \
+                                    * weight.view(B, N, 3, 1), dim=2)  # 获得插值点
+          if points1 is not None:
+              points1 = points1.permute(0, 2, 1)
+              new_points = torch.cat([points1, interpolated_points], dim=-1)
+          else:
+              new_points = interpolated_points
+          new_points = new_points.permute(0, 2, 1)
+          for i, conv in enumerate(self.mlp_convs):
+              bn = self.mlp_bns[i]
+              new_points = F.relu(bn(conv(new_points)))
+          return new_points
+  ```
+
+  - 重要变量介绍：
+
+    - xyz1：[B,C,N]，完整的点云坐标数据。
+    - xyz2：[B,C,S]，采样的centroid点坐标数据。
+    - points1：[B, D, N]，完整点云的特征数据。
+    - points2：[B, D, S]，采样的centroid点的特征数据。
+    - 
+
+  - interpolate过程：
+
+    - 由于之前对于一个完整点云，我们在其中采样了一些centroid，并使用pointnet提取了这些cnetroid周围点云的全局特征。现在我们如果需要对点云进行segment，那就需要先得到那些没有提取到特征的点的特征，这里直接就用这些centroid的特征去插值得到其他点的特征，再进行segment。
+    - 这里传入了两个点云，points1和points2，我们希望插值后points1中的非centroid点也有特征，即将points2从[B, D, S]插值到[B, D, N]
+    - 分两种情况讨论，如果仅有一个centroid，那么就没办法通过插值得到其他采样点，也就无法上采样，这里采用的；如果有多个centroid，那就用线性插值进行上采样。
+    - 第一种情况，仅有一个centroid，第八行直接将这个centroid的特征复制了N遍。N为xyz1中一个点云中点的数量。即其他的点的特征都和这个centroid的特征相同，也就代表了这些点会被centroid的是同一个类别的
+    - 第二种情况，不止一个centroid，通过线性插值得到其他点的特征。
+      - 第十行，获得了原本点云中的每个点距离所有centroid的距离。
+      - 第十一行，按照每个点距离cnetroid的距离排序。
+      - 第十二行，取距离每个点最近的三个centroid。**本身就是centroid的那些点基本不会受到其他最近的其他两个cnetroid影响，因为1.0 / + 1e-8会非常大，其他两个点的权重会被归一化到很小很小。**
+      - 第十三到十五行，按照点到cnetroid的距离的倒数为每个centroid的插值权重。
+      - 第十六行，点的特征值为最近邻的三个centroid的加权和。
+    - 十八到二十二行将点云原来的特征与插值得到的特征进行拼接。
+    - 最后再为插值后的点云进行一个MLP进一步提取特征。个人觉得，这里每个点经过拼接，既有原来点云中每个点的特征，这是较局部的特征，还有插值得到的特征，这个较全局的特征，将这两个特征直接拼接后再经过MLP提取高层特征，会既包含点云的局部特征，也包含其全局特征，加大segment的正确率。
+
+    
 

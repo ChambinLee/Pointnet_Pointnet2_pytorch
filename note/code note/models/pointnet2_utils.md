@@ -195,6 +195,7 @@ def sample_and_group_all(xyz, points):
 ```
 
 - 这个函数将整个点云作为一个group，(B,1,C)中的1代表的就是整个点云只有一个group。
+- 这个函数用在classification网络的的第一层，见下图。可以将所有点作为一个整体的global feature。
 - new_xyz仅仅是一个(B, 1, 3)的零矩阵，代表每个点云仅有一个centroid，为坐标零点。
 
 ## class PointNetSetAbstraction(nn.Module)

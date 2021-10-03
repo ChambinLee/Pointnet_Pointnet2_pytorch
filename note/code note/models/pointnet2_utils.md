@@ -137,7 +137,7 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
   - `new_xyz`：shape = (B,S,3)，每个点云有S个球邻域需要查询。
 - 第七行，`sqrdists`为一个shape为(B,S,N)的张量，记录了每个`centroid`与所属点云的其他点的距离。
 - 第六行，`group_idx`被初始化为一个`B*S*N`的矩阵（与`sqrdists`形状相同），其包含`B*S`个0~N-1的顺序向量；第八行，将`sqrdists`中距离小于半径的位置的`group_idx`的值更新为`N`；第九行，将`group_idx`从小到大排序，将那些距离centroid大于半径的点排在后面，然后取前`nsample`个点作为球邻域的采样点。
-- 上面这种采样方式假定每个球邻域中的点不少于`nsample`个点，否则就会取到半径外的点。第10~13行就是为了解决这个问题，解决方法是将采样到的半径外的点替换成距离centroid最近的点。
+- 上面这种采样方式假定每个球邻域中的点不少于`nsample`个点，否则就会取到半径外的点。第10~13行就是为了解决这个问题，解决方法是将采样到的半径外的点替换成距离centroid最近的点（==我觉得不合理==）。
 - 第十行，`group_first`是一个`B*S*nsample`的张量，B个二维矩阵包含S个centroid，某一列中的元素是重复的，均为距离 centroid最近的点的index。
 - 第十一行得到采样到半径外的点的index。
 - 第十二行将这些半径外的点更新为距离centroid最近的点的index。

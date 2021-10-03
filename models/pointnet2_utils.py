@@ -10,7 +10,7 @@ def timeit(tag, t):
 
 def pc_normalize(pc):
     """
-        归一化点云，使用centroid为中心的坐标，球半径为1
+        归一化点云，使用centroid为中心的坐标，半径为1
     """
     l = pc.shape[0]
     centroid = np.mean(pc, axis=0)

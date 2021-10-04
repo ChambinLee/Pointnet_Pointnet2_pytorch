@@ -33,7 +33,7 @@ Hierarchical point set feature learning是上图的左边模块，其由若干�
 
 ### sampling layer
 
-- 从输入的n个点$\left\{ x_1,x_2,...,x_n\right\}$中依据farthest point sampling (FPS) 算法选取$m$个最远点$\left\{ x_{i1},x_{i2},...,x_{im}\right\}$，FPS算法的思想是每次选取一个新的点的时候都要保证其与所有已经选了的点的距离和最大。这样做的好处是可以根据输入点云自适应地选取合适的区域提取局部特征，不像图像的卷积网络只能在预设好的几个点提取局部特征。
+- 从输入的n个点$\left\lbrace x_1,x_2,...,x_n\right \rbrace$中依据farthest point sampling (FPS) 算法选取$m$个最远点$\left\lbrace x_{i1},x_{i2},...,x_{im}\right \rbrace$，FPS算法的思想是每次选取一个新的点的时候都要保证其与所有已经选了的点的距离和最大。这样做的好处是可以根据输入点云自适应地选取合适的区域提取局部特征，不像图像的卷积网络只能在预设好的几个点提取局部特征。
 
 ### grouping layer
 

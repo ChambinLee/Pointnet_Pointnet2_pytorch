@@ -156,5 +156,20 @@ Hierarchical point set feature learning是上图的左边模块，其由若干�
 
     ![image-20211004220715033](img/PointNet++.assets/image-20211004220715033.png)
 
+    - performance: MSG > MRG > SSG
+    - performance: DP > no DP
+    - performance: PointNet > PointNet(vanilla)，此图未说明，Table 2说明了。
+
 ### Point Feature Propagation
+
+- ![image-20211004203620630](img/PointNet++.assets/image-20211004203620630.png)
+
+- 基于PointNet++的分类网络比较简单明了，即先经过两层set abstraction，将得到的点云（蓝色）作为一个group，不经过sampling，直接使用PointNet提取整个点云的特征向量，并最终送入全连接层进行分类。
+- 基于PointNet++的分割网络则需要想办法将因为set abstraction被subsample的点云再扩增回去，由于要确保输入点云的每个点都需要被分类，则自然需要得到每个点云的特征向量用于分类。这里作者使用的方式是使用最后一层set abstraction中sampling到的中心点的特征向量经过多次向上插值获得其他点的特征向量，在插值扩增点云特征的同时也将set abstraction得到的中间结果做跳跃连接，使得扩增的点云特征更加准确。具体来说：
+  - Segmentation网络的输入是经过两次set abstraction的稀疏点云，其中的每个点都包含其邻域特征。
+  - 第一次需要被插值的点是第一次set abstraction过程中sampling的点。
+  - 对于需要被插值的点$p$，找到其$K$个最近的点 $p_i(i=1,2,...,k)$，并且$p_i$都是输入点云中的点，即这些点的特征已知，点$p_i$的权重是该点到$p$点的距离的导数除以$K$个点的权重总和，$p$点的特征为$K$个点的特征的加权和。
+  - 插值完成以后，得到的点云与第一次set abstraction的结果大小相同，将相同点的特征前后拼接在一起。
+  - 可以发现，插值得到的特征具有点的更高层次的特征，其感受野更大，第一次set abstraction得到的点的特征包含更丰富的细节信息。接下来经过一个unit PointNet（将两种特征融合？）。所谓的unit PointNet就是对每个点的特征经过几层全连接层，结果的点数保持不变，每个点的特征发生变化。
+  - 以上就进行了一次特征的插值，网络还进行了一次插值，从而将点的数量恢复到原来点云的数量。
 

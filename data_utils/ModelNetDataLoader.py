@@ -92,7 +92,7 @@ class ModelNetDataLoader(Dataset):
                     fn = self.datapath[index]
                     cls = self.classes[self.datapath[index][0]]
                     cls = np.array([cls]).astype(np.int32)
-                    point_set = np.loadtxt(fn[1], delimiter=',').astype(np.float32)
+                    point_set = np.genfromtxt(fn[1], delimiter=',').astype(np.float32)
 
                     if self.uniform:
                         point_set = farthest_point_sample(point_set, self.npoints)

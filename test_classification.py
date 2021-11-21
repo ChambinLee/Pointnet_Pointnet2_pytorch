@@ -3,6 +3,7 @@ Author: Benny
 Date: Nov 2019
 """
 from data_utils.ModelNetDataLoader import ModelNetDataLoader
+import torch.nn.DataParallel
 import argparse
 import numpy as np
 import os
